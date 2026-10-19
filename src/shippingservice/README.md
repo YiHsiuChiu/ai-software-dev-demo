@@ -10,10 +10,10 @@ Run the following command to restore dependencies to `vendor/` directory:
 
 ## Build
 
-From `src/shippingservice`, run:
+From the repository root, run:
 
 ```
-docker build ./
+docker compose build shippingservice
 ```
 
 ## Test

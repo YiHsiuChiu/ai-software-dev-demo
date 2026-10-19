@@ -1,0 +1,123 @@
+# Online Boutique local development (based on official microservices-demo main/v0 layout)
+# Run from the root of GoogleCloudPlatform/microservices-demo.
+name: online-boutique-reppit
+
+x-defaults: &defaults
+  restart: unless-stopped
+  init: true
+
+services:
+  redis-cart:
+    <<: *defaults
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  productcatalogservice:
+    <<: *defaults
+    build: ./src/productcatalogservice
+    environment:
+      PORT: "3550"
+      DISABLE_PROFILER: "1"
+
+  currencyservice:
+    <<: *defaults
+    build: ./src/currencyservice
+    environment:
+      PORT: "7000"
+      DISABLE_PROFILER: "1"
+
+  cartservice:
+    <<: *defaults
+    build:
+      context: ./src/cartservice/src
+      dockerfile: Dockerfile
+    environment:
+      REDIS_ADDR: redis-cart:6379
+    depends_on:
+      redis-cart:
+        condition: service_healthy
+
+  shippingservice:
+    <<: *defaults
+    build: ./src/shippingservice
+    environment:
+      PORT: "50051"
+      DISABLE_PROFILER: "1"
+
+  paymentservice:
+    <<: *defaults
+    build: ./src/paymentservice
+    environment:
+      PORT: "50051"
+      DISABLE_PROFILER: "1"
+
+  emailservice:
+    <<: *defaults
+    build: ./src/emailservice
+    environment:
+      PORT: "8080"
+      DISABLE_PROFILER: "1"
+
+  recommendationservice:
+    <<: *defaults
+    build: ./src/recommendationservice
+    environment:
+      PORT: "8080"
+      PRODUCT_CATALOG_SERVICE_ADDR: productcatalogservice:3550
+      DISABLE_PROFILER: "1"
+    depends_on:
+      - productcatalogservice
+
+  adservice:
+    <<: *defaults
+    build: ./src/adservice
+    environment:
+      PORT: "9555"
+
+  checkoutservice:
+    <<: *defaults
+    build: ./src/checkoutservice
+    environment:
+      PORT: "5050"
+      PRODUCT_CATALOG_SERVICE_ADDR: productcatalogservice:3550
+      SHIPPING_SERVICE_ADDR: shippingservice:50051
+      PAYMENT_SERVICE_ADDR: paymentservice:50051
+      EMAIL_SERVICE_ADDR: emailservice:8080
+      CURRENCY_SERVICE_ADDR: currencyservice:7000
+      CART_SERVICE_ADDR: cartservice:7070
+    depends_on:
+      - productcatalogservice
+      - shippingservice
+      - paymentservice
+      - emailservice
+      - currencyservice
+      - cartservice
+
+  frontend:
+    <<: *defaults
+    build: ./src/frontend
+    ports:
+      - "127.0.0.1:8080:8080"
+    environment:
+      PORT: "8080"
+      PRODUCT_CATALOG_SERVICE_ADDR: productcatalogservice:3550
+      CURRENCY_SERVICE_ADDR: currencyservice:7000
+      CART_SERVICE_ADDR: cartservice:7070
+      RECOMMENDATION_SERVICE_ADDR: recommendationservice:8080
+      SHIPPING_SERVICE_ADDR: shippingservice:50051
+      CHECKOUT_SERVICE_ADDR: checkoutservice:5050
+      AD_SERVICE_ADDR: adservice:9555
+      # Frontend requires this variable even with the assistant UI disabled.
+      SHOPPING_ASSISTANT_SERVICE_ADDR: shoppingassistantservice:80
+      ENABLE_ASSISTANT: "false"
+      ENABLE_TRACING: "0"
+      ENABLE_PROFILER: "0"
+    depends_on:
+      - checkoutservice
+      - recommendationservice
+      - adservice

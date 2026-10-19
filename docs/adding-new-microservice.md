@@ -21,38 +21,38 @@ Take a look at existing microservices for inspiration.
 
 Create a `Dockerfile` in your microservice's directory. This file will define the steps to build a container image for your service.
 
-Refer to this example and tweak based on your new service's needs: https://github.com/GoogleCloudPlatform/microservices-demo/blob/main/src/frontend/Dockerfile
+Refer to the [`frontend` Dockerfile](/src/frontend/Dockerfile) and tweak it based on your new service's needs.
 
-## 4. Create Kubernetes manifests
+## 4. Update `compose.yaml`
 
-Create a new directory under `kustomize/components/` in the root of the repository for your microservice. Inside this directory, add the necessary Kubernetes YAML files for your new microservice. This typically includes:
+Add your new service under `services` in the root [`compose.yaml`](/compose.yaml). A service definition typically includes:
 
-- A **Deployment** to manage your service's pods.
-- A **Service** to expose your microservice to other services within the cluster.
+- A `build` path that points to the service's Docker build context.
+- The environment variables required by the service.
+- A `depends_on` list when the service relies on other containers.
+- A host `ports` mapping only when the service must be accessed directly from the host.
 
-Ensure you follow the existing naming conventions and that the container image specified in the Deployment matches the one built by your `cloudbuild.yaml` and `skaffold.yaml` files.
+Follow the existing naming conventions. Containers can reach the new service by using its Compose service name and container port, for example `myservice:8080`.
 
-Refer to this example and tweak based on your new service's needs: https://github.com/GoogleCloudPlatform/microservices-demo/tree/main/kustomize/components/shopping-assistant
+Refer to an existing service in [`compose.yaml`](/compose.yaml) and adjust it to match your service's build context, port, and dependencies.
 
-## 5. Update the root `kustomization.yaml` file
+## 5. Connect dependent services
 
-Add your newly created component to the root kustomization file so it gets picked up by the deployment cycle.
+If another service calls the new microservice, add the new endpoint to that service's environment variables in `compose.yaml`. Use the Compose service name rather than `localhost`, because each service runs in its own container.
 
-The file is available here: https://github.com/GoogleCloudPlatform/microservices-demo/blob/main/kustomize/kustomization.yaml
+If the service communicates over gRPC, update the Protocol Buffer definitions and generated clients as needed.
 
-## 6. Update the root `skaffold.yaml`
+## 6. Build and verify the service
 
-Add your newly created service to the root skaffold file so the images build correctly.
+Validate the Compose configuration, then build and start the service from the repository root:
 
-The file is available here: https://github.com/GoogleCloudPlatform/microservices-demo/blob/main/skaffold.yaml
+```sh
+docker compose config
+docker compose up -d --build <service-name>
+docker compose logs -f <service-name>
+```
 
-## 7. Update the Helm chart
-
-Add your newly created service to the Helm chart templates and default values.
-
-The chart is available here: https://github.com/GoogleCloudPlatform/microservices-demo/tree/main/helm-chart
-
-## 8. Update the documentation
+## 7. Update the documentation
 
 Finally, update the project's documentation to reflect the addition of your new microservice. This may include:
 

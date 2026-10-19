@@ -22,7 +22,17 @@ RUN apk update \
 
 # get packages
 COPY requirements.txt .
-RUN pip install -r requirements.txt
+# RUN pip install -r requirements.txt
+
+# Use setuptools version that still provides pkg_resources
+RUN python -m pip install --no-cache-dir \
+    "setuptools==80.9.0" \
+    wheel
+
+# Avoid creating a separate build environment
+RUN python -m pip install --no-cache-dir \
+    --no-build-isolation \
+    -r requirements.txt
 
 FROM base
 # Enable unbuffered logging

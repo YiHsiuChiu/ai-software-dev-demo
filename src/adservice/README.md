@@ -18,11 +18,10 @@ If you need to upgrade the version of gradle then run
 ./gradlew wrapper --gradle-version <new-version>
 ```
 
-## Building docker image
+## Building the container image
 
-From `src/adservice/`, run:
+From the repository root, run:
 
 ```
-docker build ./
+docker compose build adservice
 ```
-

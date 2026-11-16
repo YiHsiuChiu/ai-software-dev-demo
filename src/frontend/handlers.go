@@ -268,18 +268,13 @@ func (fe *frontendServer) viewCartHandler(w http.ResponseWriter, r *http.Request
 		log.WithField("error", err).Warn("failed to get product recommendations")
 	}
 
-	shippingCost, err := fe.getShippingQuote(r.Context(), cart, currentCurrency(r))
-	if err != nil {
-		renderHTTPError(log, r, w, errors.Wrap(err, "failed to get shipping quote"), http.StatusInternalServerError)
-		return
-	}
-
 	type cartItemView struct {
 		Item     *pb.Product
 		Quantity int32
 		Price    *pb.Money
 	}
 	items := make([]cartItemView, len(cart))
+	itemsUSD := pb.Money{CurrencyCode: "USD", Units: 0, Nanos: 0}
 	totalPrice := pb.Money{CurrencyCode: currentCurrency(r)}
 	for i, item := range cart {
 		p, err := fe.getProduct(r.Context(), item.GetProductId())
@@ -299,6 +294,17 @@ func (fe *frontendServer) viewCartHandler(w http.ResponseWriter, r *http.Request
 			Quantity: item.GetQuantity(),
 			Price:    &multPrice}
 		totalPrice = money.Must(money.Sum(totalPrice, multPrice))
+
+		if item.GetQuantity() > 0 {
+			multPriceUSD := money.MultiplySlow(*p.GetPriceUsd(), uint32(item.GetQuantity()))
+			itemsUSD = money.Must(money.Sum(itemsUSD, multPriceUSD))
+		}
+	}
+
+	shippingCost, err := fe.getShippingQuote(r.Context(), cart, &itemsUSD, currentCurrency(r))
+	if err != nil {
+		renderHTTPError(log, r, w, errors.Wrap(err, "failed to get shipping quote"), http.StatusInternalServerError)
+		return
 	}
 	totalPrice = money.Must(money.Sum(totalPrice, *shippingCost))
 	year := time.Now().Year()

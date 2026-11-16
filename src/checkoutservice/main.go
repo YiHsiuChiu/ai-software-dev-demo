@@ -290,11 +290,11 @@ func (cs *checkoutService) prepareOrderItemsAndShippingQuoteFromCart(ctx context
 	if err != nil {
 		return out, fmt.Errorf("cart failure: %+v", err)
 	}
-	orderItems, err := cs.prepOrderItems(ctx, cartItems, userCurrency)
+	orderItems, itemsSubtotalUSD, err := cs.prepOrderItems(ctx, cartItems, userCurrency)
 	if err != nil {
 		return out, fmt.Errorf("failed to prepare order: %+v", err)
 	}
-	shippingUSD, err := cs.quoteShipping(ctx, address, cartItems)
+	shippingUSD, err := cs.quoteShipping(ctx, address, cartItems, itemsSubtotalUSD)
 	if err != nil {
 		return out, fmt.Errorf("shipping quote failure: %+v", err)
 	}
@@ -309,11 +309,12 @@ func (cs *checkoutService) prepareOrderItemsAndShippingQuoteFromCart(ctx context
 	return out, nil
 }
 
-func (cs *checkoutService) quoteShipping(ctx context.Context, address *pb.Address, items []*pb.CartItem) (*pb.Money, error) {
+func (cs *checkoutService) quoteShipping(ctx context.Context, address *pb.Address, items []*pb.CartItem, subtotalUSD *pb.Money) (*pb.Money, error) {
 	shippingQuote, err := pb.NewShippingServiceClient(cs.shippingSvcConn).
 		GetQuote(ctx, &pb.GetQuoteRequest{
-			Address: address,
-			Items:   items})
+			Address:          address,
+			Items:            items,
+			ItemsSubtotalUsd: subtotalUSD})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get shipping quote: %+v", err)
 	}
@@ -335,24 +336,30 @@ func (cs *checkoutService) emptyUserCart(ctx context.Context, userID string) err
 	return nil
 }
 
-func (cs *checkoutService) prepOrderItems(ctx context.Context, items []*pb.CartItem, userCurrency string) ([]*pb.OrderItem, error) {
+func (cs *checkoutService) prepOrderItems(ctx context.Context, items []*pb.CartItem, userCurrency string) ([]*pb.OrderItem, *pb.Money, error) {
 	out := make([]*pb.OrderItem, len(items))
 	cl := pb.NewProductCatalogServiceClient(cs.productCatalogSvcConn)
+	subtotalUSD := pb.Money{CurrencyCode: usdCurrency, Units: 0, Nanos: 0}
 
 	for i, item := range items {
 		product, err := cl.GetProduct(ctx, &pb.GetProductRequest{Id: item.GetProductId()})
 		if err != nil {
-			return nil, fmt.Errorf("failed to get product #%q", item.GetProductId())
+			return nil, nil, fmt.Errorf("failed to get product #%q", item.GetProductId())
 		}
 		price, err := cs.convertCurrency(ctx, product.GetPriceUsd(), userCurrency)
 		if err != nil {
-			return nil, fmt.Errorf("failed to convert price of %q to %s", item.GetProductId(), userCurrency)
+			return nil, nil, fmt.Errorf("failed to convert price of %q to %s", item.GetProductId(), userCurrency)
 		}
 		out[i] = &pb.OrderItem{
 			Item: item,
 			Cost: price}
+
+		if item.GetQuantity() > 0 {
+			multPrice := money.MultiplySlow(*product.GetPriceUsd(), uint32(item.GetQuantity()))
+			subtotalUSD = money.Must(money.Sum(subtotalUSD, multPrice))
+		}
 	}
-	return out, nil
+	return out, &subtotalUSD, nil
 }
 
 func (cs *checkoutService) convertCurrency(ctx context.Context, from *pb.Money, toCurrency string) (*pb.Money, error) {

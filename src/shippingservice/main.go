@@ -118,10 +118,23 @@ func (s *server) GetQuote(ctx context.Context, in *pb.GetQuoteRequest) (*pb.GetQ
 	log.Info("[GetQuote] received request")
 	defer log.Info("[GetQuote] completed request")
 
-	// 1. Generate a quote based on the total number of items to be shipped.
+	// 1. Check if items subtotal is >= 200 USD for free shipping.
+	if subtotal := in.GetItemsSubtotalUsd(); subtotal != nil {
+		if subtotal.GetUnits() > 200 || (subtotal.GetUnits() == 200 && subtotal.GetNanos() >= 0) {
+			return &pb.GetQuoteResponse{
+				CostUsd: &pb.Money{
+					CurrencyCode: "USD",
+					Units:        0,
+					Nanos:        0,
+				},
+			}, nil
+		}
+	}
+
+	// 2. Generate a quote based on the total number of items to be shipped.
 	quote := CreateQuoteFromCount(0)
 
-	// 2. Generate a response.
+	// 3. Generate a response.
 	return &pb.GetQuoteResponse{
 		CostUsd: &pb.Money{
 			CurrencyCode: "USD",

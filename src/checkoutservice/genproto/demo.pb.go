@@ -1416,6 +1416,7 @@ type OrderResult struct {
 	ShippingCost       *Money       `protobuf:"bytes,3,opt,name=shipping_cost,json=shippingCost,proto3" json:"shipping_cost,omitempty"`
 	ShippingAddress    *Address     `protobuf:"bytes,4,opt,name=shipping_address,json=shippingAddress,proto3" json:"shipping_address,omitempty"`
 	Items              []*OrderItem `protobuf:"bytes,5,rep,name=items,proto3" json:"items,omitempty"`
+	Discount           *Money       `protobuf:"bytes,6,opt,name=discount,proto3" json:"discount,omitempty"`
 }
 
 func (x *OrderResult) Reset() {
@@ -1481,6 +1482,13 @@ func (x *OrderResult) GetShippingAddress() *Address {
 func (x *OrderResult) GetItems() []*OrderItem {
 	if x != nil {
 		return x.Items
+	}
+	return nil
+}
+
+func (x *OrderResult) GetDiscount() *Money {
+	if x != nil {
+		return x.Discount
 	}
 	return nil
 }

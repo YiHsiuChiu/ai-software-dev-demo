@@ -301,10 +301,29 @@ func (fe *frontendServer) viewCartHandler(w http.ResponseWriter, r *http.Request
 		}
 	}
 
-	shippingCost, err := fe.getShippingQuote(r.Context(), cart, &itemsUSD, currentCurrency(r))
+	discountThresholdUSD := pb.Money{CurrencyCode: "USD", Units: 300, Nanos: 0}
+	discountUSD := pb.Money{CurrencyCode: "USD", Units: 30, Nanos: 0}
+	discountedSubtotalUSD := itemsUSD
+	discountCost := &pb.Money{CurrencyCode: currentCurrency(r), Units: 0, Nanos: 0}
+
+	cmp, err := money.Compare(itemsUSD, discountThresholdUSD)
+	if err == nil && cmp >= 0 {
+		discountedSubtotalUSD = money.Must(money.Sub(itemsUSD, discountUSD))
+		convertedDiscount, err := fe.convertCurrency(r.Context(), &discountUSD, currentCurrency(r))
+		if err != nil {
+			renderHTTPError(log, r, w, errors.Wrap(err, "failed to convert discount to currency"), http.StatusInternalServerError)
+			return
+		}
+		discountCost = convertedDiscount
+	}
+
+	shippingCost, err := fe.getShippingQuote(r.Context(), cart, &discountedSubtotalUSD, currentCurrency(r))
 	if err != nil {
 		renderHTTPError(log, r, w, errors.Wrap(err, "failed to get shipping quote"), http.StatusInternalServerError)
 		return
+	}
+	if !money.IsZero(*discountCost) {
+		totalPrice = money.Must(money.Sub(totalPrice, *discountCost))
 	}
 	totalPrice = money.Must(money.Sum(totalPrice, *shippingCost))
 	year := time.Now().Year()
@@ -314,6 +333,7 @@ func (fe *frontendServer) viewCartHandler(w http.ResponseWriter, r *http.Request
 		"recommendations":  recommendations,
 		"cart_size":        cartSize(cart),
 		"shipping_cost":    shippingCost,
+		"discount":         discountCost,
 		"show_currency":    true,
 		"total_cost":       totalPrice,
 		"items":            items,
@@ -387,6 +407,9 @@ func (fe *frontendServer) placeOrderHandler(w http.ResponseWriter, r *http.Reque
 	for _, v := range order.GetOrder().GetItems() {
 		multPrice := money.MultiplySlow(*v.GetCost(), uint32(v.GetItem().GetQuantity()))
 		totalPaid = money.Must(money.Sum(totalPaid, multPrice))
+	}
+	if d := order.GetOrder().GetDiscount(); d != nil && !money.IsZero(*d) {
+		totalPaid = money.Must(money.Sub(totalPaid, *d))
 	}
 
 	currencies, err := fe.getCurrencies(r.Context())

@@ -243,3 +243,68 @@ func TestSum(t *testing.T) {
 		})
 	}
 }
+
+func TestSub(t *testing.T) {
+	type args struct {
+		l pb.Money
+		r pb.Money
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    pb.Money
+		wantErr error
+	}{
+		{"0-0=0", args{mm(0, 0), mm(0, 0)}, mm(0, 0), nil},
+		{"positive-positive (no borrow)", args{mm(5, 500000000), mm(2, 200000000)}, mm(3, 300000000), nil},
+		{"positive-positive (with borrow)", args{mm(5, 200000000), mm(2, 500000000)}, mm(2, 700000000), nil},
+		{"equal values gives 0", args{mm(30, 0), mm(30, 0)}, mm(0, 0), nil},
+		{"order discount $350 - $30 = $320", args{mm(350, 0), mm(30, 0)}, mm(320, 0), nil},
+		{"currency mismatch error", args{mmc(10, 0, "USD"), mmc(10, 0, "EUR")}, pb.Money{}, ErrMismatchingCurrency},
+		{"invalid value error", args{mm(1, -1), mm(0, 0)}, pb.Money{}, ErrInvalidValue},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Sub(tt.args.l, tt.args.r)
+			if err != tt.wantErr {
+				t.Errorf("Sub([%v],[%v]): expected err=\"%v\" got=\"%v\"", tt.args.l, tt.args.r, tt.wantErr, err)
+			}
+			if !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("Sub([%v],[%v]) = %v, want %v", tt.args.l, tt.args.r, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCompare(t *testing.T) {
+	type args struct {
+		l pb.Money
+		r pb.Money
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    int
+		wantErr error
+	}{
+		{"equal 0", args{mm(0, 0), mm(0, 0)}, 0, nil},
+		{"equal positive", args{mm(300, 0), mm(300, 0)}, 0, nil},
+		{"l greater units", args{mm(301, 0), mm(300, 0)}, 1, nil},
+		{"l smaller units", args{mm(299, 990000000), mm(300, 0)}, -1, nil},
+		{"equal units, l greater nanos", args{mm(300, 100), mm(300, 0)}, 1, nil},
+		{"equal units, l smaller nanos", args{mm(300, 0), mm(300, 100)}, -1, nil},
+		{"currency mismatch error", args{mmc(300, 0, "USD"), mmc(300, 0, "EUR")}, 0, ErrMismatchingCurrency},
+		{"invalid value error", args{mm(1, -1), mm(0, 0)}, 0, ErrInvalidValue},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := Compare(tt.args.l, tt.args.r)
+			if err != tt.wantErr {
+				t.Errorf("Compare([%v],[%v]): expected err=\"%v\" got=\"%v\"", tt.args.l, tt.args.r, tt.wantErr, err)
+			}
+			if got != tt.want {
+				t.Errorf("Compare([%v],[%v]) = %v, want %v", tt.args.l, tt.args.r, got, tt.want)
+			}
+		})
+	}
+}

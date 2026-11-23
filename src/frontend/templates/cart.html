@@ -90,6 +90,13 @@
                         <div class="col pr-md-0 text-right">{{ renderMoney .shipping_cost }}</div>
                     </div>
 
+                    {{ if and .discount (or (gt .discount.GetUnits 0) (gt .discount.GetNanos 0)) }}
+                    <div class="row cart-summary-discount-row text-success">
+                        <div class="col pl-md-0">Discount (Orders $300+)</div>
+                        <div class="col pr-md-0 text-right">- {{ renderMoney .discount }}</div>
+                    </div>
+                    {{ end }}
+
                     <div class="row cart-summary-total-row">
                         <div class="col pl-md-0">Total</div>
                         <div class="col pr-md-0 text-right">{{ renderMoney .total_cost }}</div>

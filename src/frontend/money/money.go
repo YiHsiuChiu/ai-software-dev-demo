@@ -130,3 +130,35 @@ func MultiplySlow(m pb.Money, n uint32) pb.Money {
 	}
 	return out
 }
+
+// Sub subtracts r from l (l - r). Returns an error if one of the values is invalid or
+// currency codes are not matching.
+func Sub(l, r pb.Money) (pb.Money, error) {
+	return Sum(l, Negate(r))
+}
+
+// Compare returns:
+//
+//	 1 if l > r
+//	 0 if l == r
+//	-1 if l < r
+//
+// Returns an error if one of the values is invalid or currency codes mismatch.
+func Compare(l, r pb.Money) (int, error) {
+	if !IsValid(l) || !IsValid(r) {
+		return 0, ErrInvalidValue
+	} else if l.GetCurrencyCode() != r.GetCurrencyCode() {
+		return 0, ErrMismatchingCurrency
+	}
+	if l.GetUnits() > r.GetUnits() {
+		return 1, nil
+	} else if l.GetUnits() < r.GetUnits() {
+		return -1, nil
+	}
+	if l.GetNanos() > r.GetNanos() {
+		return 1, nil
+	} else if l.GetNanos() < r.GetNanos() {
+		return -1, nil
+	}
+	return 0, nil
+}

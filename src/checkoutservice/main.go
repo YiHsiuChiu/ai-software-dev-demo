@@ -247,6 +247,9 @@ func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderReq
 		multPrice := money.MultiplySlow(*it.Cost, uint32(it.GetItem().GetQuantity()))
 		total = money.Must(money.Sum(total, multPrice))
 	}
+	if prep.discountLocalized != nil && !money.IsZero(*prep.discountLocalized) {
+		total = money.Must(money.Sub(total, *prep.discountLocalized))
+	}
 
 	txID, err := cs.chargeCard(ctx, &total, req.CreditCard)
 	if err != nil {
@@ -267,6 +270,7 @@ func (cs *checkoutService) PlaceOrder(ctx context.Context, req *pb.PlaceOrderReq
 		ShippingCost:       prep.shippingCostLocalized,
 		ShippingAddress:    req.Address,
 		Items:              prep.orderItems,
+		Discount:           prep.discountLocalized,
 	}
 
 	if err := cs.sendOrderConfirmation(ctx, req.Email, orderResult); err != nil {
@@ -282,6 +286,7 @@ type orderPrep struct {
 	orderItems            []*pb.OrderItem
 	cartItems             []*pb.CartItem
 	shippingCostLocalized *pb.Money
+	discountLocalized     *pb.Money
 }
 
 func (cs *checkoutService) prepareOrderItemsAndShippingQuoteFromCart(ctx context.Context, userID, userCurrency string, address *pb.Address) (orderPrep, error) {
@@ -294,7 +299,25 @@ func (cs *checkoutService) prepareOrderItemsAndShippingQuoteFromCart(ctx context
 	if err != nil {
 		return out, fmt.Errorf("failed to prepare order: %+v", err)
 	}
-	shippingUSD, err := cs.quoteShipping(ctx, address, cartItems, itemsSubtotalUSD)
+
+	discountThresholdUSD := pb.Money{CurrencyCode: usdCurrency, Units: 300, Nanos: 0}
+	discountUSD := pb.Money{CurrencyCode: usdCurrency, Units: 30, Nanos: 0}
+	discountedSubtotalUSD := *itemsSubtotalUSD
+	discountLocalized := &pb.Money{CurrencyCode: userCurrency, Units: 0, Nanos: 0}
+
+	cmp, err := money.Compare(*itemsSubtotalUSD, discountThresholdUSD)
+	if err != nil {
+		return out, fmt.Errorf("failed to compare discount threshold: %+v", err)
+	}
+	if cmp >= 0 {
+		discountedSubtotalUSD = money.Must(money.Sub(*itemsSubtotalUSD, discountUSD))
+		discountLocalized, err = cs.convertCurrency(ctx, &discountUSD, userCurrency)
+		if err != nil {
+			return out, fmt.Errorf("failed to convert discount to currency: %+v", err)
+		}
+	}
+
+	shippingUSD, err := cs.quoteShipping(ctx, address, cartItems, &discountedSubtotalUSD)
 	if err != nil {
 		return out, fmt.Errorf("shipping quote failure: %+v", err)
 	}
@@ -304,6 +327,7 @@ func (cs *checkoutService) prepareOrderItemsAndShippingQuoteFromCart(ctx context
 	}
 
 	out.shippingCostLocalized = shippingPrice
+	out.discountLocalized = discountLocalized
 	out.cartItems = cartItems
 	out.orderItems = orderItems
 	return out, nil

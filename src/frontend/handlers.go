@@ -403,12 +403,32 @@ func (fe *frontendServer) placeOrderHandler(w http.ResponseWriter, r *http.Reque
 	order.GetOrder().GetItems()
 	recommendations, _ := fe.getRecommendations(r.Context(), sessionID(r), nil)
 
+	itemsUSD := pb.Money{CurrencyCode: "USD", Units: 0, Nanos: 0}
 	totalPaid := *order.GetOrder().GetShippingCost()
 	for _, v := range order.GetOrder().GetItems() {
 		multPrice := money.MultiplySlow(*v.GetCost(), uint32(v.GetItem().GetQuantity()))
 		totalPaid = money.Must(money.Sum(totalPaid, multPrice))
+
+		p, err := fe.getProduct(r.Context(), v.GetItem().GetProductId())
+		if err == nil && v.GetItem().GetQuantity() > 0 {
+			multPriceUSD := money.MultiplySlow(*p.GetPriceUsd(), uint32(v.GetItem().GetQuantity()))
+			itemsUSD = money.Must(money.Sum(itemsUSD, multPriceUSD))
+		}
 	}
-	if d := order.GetOrder().GetDiscount(); d != nil && !money.IsZero(*d) {
+
+	discountThresholdUSD := pb.Money{CurrencyCode: "USD", Units: 300, Nanos: 0}
+	discountUSD := pb.Money{CurrencyCode: "USD", Units: 30, Nanos: 0}
+	discountCost := &pb.Money{CurrencyCode: currentCurrency(r), Units: 0, Nanos: 0}
+
+	cmp, err := money.Compare(itemsUSD, discountThresholdUSD)
+	if err == nil && cmp >= 0 {
+		convertedDiscount, err := fe.convertCurrency(r.Context(), &discountUSD, currentCurrency(r))
+		if err == nil {
+			discountCost = convertedDiscount
+			totalPaid = money.Must(money.Sub(totalPaid, *discountCost))
+		}
+	} else if d := order.GetOrder().GetDiscount(); d != nil && !money.IsZero(*d) {
+		discountCost = d
 		totalPaid = money.Must(money.Sub(totalPaid, *d))
 	}
 
@@ -423,6 +443,7 @@ func (fe *frontendServer) placeOrderHandler(w http.ResponseWriter, r *http.Reque
 		"currencies":      currencies,
 		"order":           order.GetOrder(),
 		"total_paid":      &totalPaid,
+		"discount":        discountCost,
 		"recommendations": recommendations,
 	})); err != nil {
 		log.Println(err)

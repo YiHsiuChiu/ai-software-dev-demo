@@ -1,0 +1,55 @@
+
+name: Email Service SonarQube
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src/emailservice/**"
+      - "sonar-project.properties"
+      - ".github/workflows/email-sonar.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  sonar-scan:
+    name: SonarQube Scan
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v8.5.0
+        with:
+          args: >
+            -Dsonar.qualitygate.wait=true
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Check High Severity Issues
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          response=$(curl --fail-with-body -sS -G \
+            -u "${SONAR_TOKEN}:" \
+            --data-urlencode "componentKeys=YiHsiuChiu_ci-cd-demo" \
+            --data-urlencode "impactSeverities=HIGH,BLOCKER" \
+            --data-urlencode "issueStatuses=OPEN,CONFIRMED" \
+            "https://sonarcloud.io/api/issues/search")
+
+          count=$(echo "$response" | jq -er '.total | numbers')
+
+          echo "High/Blocker issues: $count"
+
+          if [ "$count" -gt 0 ]; then
+            echo "::error::Quality check failed: $count High/Blocker issues found"
+            exit 1
+          fi
+
+          echo "PASS: No High/Blocker issues!"

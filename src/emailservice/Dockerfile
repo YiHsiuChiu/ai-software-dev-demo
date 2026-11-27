@@ -49,8 +49,10 @@ WORKDIR /email_server
 # Grab packages from builder
 COPY --from=builder /usr/local/lib/python3.12/ /usr/local/lib/python3.12/
 
-# Add the application
-COPY . .
+# Add only required application files
+COPY email_server.py email_client.py logger.py de,o_pb2.py demo_pb2_grpc.py ./
+COPY templates/ ./templates/
+COPY tests/ ./tests/
 
 EXPOSE 8080
 ENTRYPOINT [ "python", "email_server.py" ]

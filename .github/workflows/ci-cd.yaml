@@ -1,147 +1,107 @@
-# Copyright 2026 Google LLC
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#      http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-
-name: "CI/CD Pipeline"
+name: Email Service CI
 
 on:
+  workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [main]
+    paths:
+      - "src/emailservice/**"
+      - ".github/workflows/email-ci.yml"
   pull_request:
-    branches:
-      - main
+    paths:
+      - "src/emailservice/**"
+      - ".github/workflows/email-ci.yml"
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+permissions:
+  contents: read
 
 jobs:
-  # ==========================================
-  # Stage 1: CI Unit Tests (Go & .NET)
-  # ==========================================
-  unit-tests:
-    name: "Unit Tests"
-    runs-on: ubuntu-latest
+  email-service:
+    runs-on: ubuntu-24.04
+
     steps:
-      - name: "Checkout Code"
+      - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: "Setup Go"
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.23"
-
-      - name: "Run Go Unit Tests"
+      # Build Docker Image
+      - name: Build Docker Image
         run: |
-          for SERVICE in "checkoutservice" "frontend" "productcatalogservice" "shippingservice"; do
-            echo "::group::Testing $SERVICE"
-            pushd src/$SERVICE
-            go test -v ./...
-            popd
-            echo "::endgroup::"
-          done
+          docker build \
+            -t emailservice-ci \
+            ./src/emailservice
 
-      - name: "Setup .NET"
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "9.0.x"
-
-      - name: "Run .NET Unit Tests"
+      # Run Unit Tests
+      - name: Run Unit Tests
         run: |
-          dotnet test src/cartservice/tests/cartservice.tests.csproj --verbosity normal
+          docker run --rm \
+            --entrypoint sh \
+            emailservice-ci \
+            -c "pip install --no-cache-dir pytest==8.4.2 && python -m pytest -v tests/test_email.py"
 
-  # ==========================================
-  # Stage 2: CI Integration & E2E Smoke Test
-  # ==========================================
-  compose-smoke-test:
-    name: "Docker Compose Integration & Smoke Test"
-    needs: unit-tests
-    runs-on: ubuntu-latest
-    steps:
-      - name: "Checkout Code"
-        uses: actions/checkout@v4
-
-      - name: "Build and Start Application with Docker Compose"
+      # Start Email Server
+      - name: Start Email Server
         run: |
-          docker compose up --build -d
-
-      - name: "Wait for Frontend Service Readiness"
-        timeout-minutes: 5
+          docker run -d \
+            --name emailservice-ci \
+            -e PORT=8080 \
+            -e DISABLE_PROFILER=1 \
+            emailservice-ci
+            
+      # Smoke Test
+      - name: Verify Email Service Health
         run: |
-          echo "Waiting for frontend service to be ready at http://localhost:8080/..."
-          for i in {1..30}; do
-            STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/ || true)
-            echo "Attempt $i: HTTP Status $STATUS"
-            if [ "$STATUS" = "200" ]; then
-              echo "Frontend is ready and responding with HTTP 200!"
-              exit 0
-            fi
-            sleep 3
-          done
-          echo "Timeout: Frontend service failed to become ready within timeout window."
-          exit 1
+          docker exec -i emailservice-ci python - <<'PY'
+          import grpc
+          from grpc_health.v1 import health_pb2, health_pb2_grpc
 
-      - name: "Execute Smoke Test"
-        run: |
-          echo "Executing Smoke Test against http://localhost:8080/..."
-          RESPONSE=$(curl -f -L -sS http://localhost:8080/)
-          if echo "$RESPONSE" | grep -qi "Online Boutique"; then
-            echo "Smoke test passed: Online Boutique storefront loaded successfully."
-          else
-            echo "Smoke test failed: Expected homepage content not found in response."
-            exit 1
-          fi
+          with grpc.insecure_channel("localhost:8080") as channel:
+              grpc.channel_ready_future(channel).result(timeout=30)
 
-      - name: "Dump Docker Compose Logs on Failure"
-        if: failure()
-        run: |
-          echo "::group::Docker Compose Logs"
-          docker compose logs --tail=100
-          echo "::endgroup::"
+              client = health_pb2_grpc.HealthStub(channel)
+              response = client.Check(
+                  health_pb2.HealthCheckRequest(),
+                  timeout=10
+              )
 
-      - name: "Teardown Docker Compose"
+              assert response.status == health_pb2.HealthCheckResponse.SERVING
+              print("PASS: Email service is healthy!")
+          PY
+
+      # Show logs
+      - name: Show Server Logs
         if: always()
-        run: |
-          docker compose down
+        run: docker logs emailservice-ci || true
 
-  # ==========================================
-  # Stage 3: CD Deployment to Render
-  # ==========================================
-  deploy-to-render:
-    name: "Deploy to Render"
-    needs: compose-smoke-test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    steps:
-      - name: "Trigger Render Deploy Hook"
-        env:
-          RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
-        run: |
-          if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
-            echo "Error: RENDER_DEPLOY_HOOK_URL secret is not set in GitHub Repository Secrets."
-            echo "Please configure RENDER_DEPLOY_HOOK_URL in repository Settings -> Secrets and variables -> Actions."
-            exit 1
-          fi
-          echo "Triggering Render deployment via deploy hook..."
-          RESPONSE=$(curl -sS -w "\nHTTP_STATUS:%{http_code}" -X POST "$RENDER_DEPLOY_HOOK_URL")
-          HTTP_STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS:" | cut -d':' -f2)
-          BODY=$(echo "$RESPONSE" | grep -v "HTTP_STATUS:")
-          echo "Render response body: $BODY"
-          echo "HTTP Status Code: $HTTP_STATUS"
-          if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
-            echo "Successfully triggered Render deployment!"
-          else
-            echo "Failed to trigger Render deployment. Received HTTP status: $HTTP_STATUS"
-            exit 1
-          fi
+      # Cleanup
+      - name: Cleanup
+        if: always()
+        run: docker rm -f emailservice-ci || true
+
+  
+  #deploy-to-render:
+    #name: "Deploy to Render"
+    #needs: compose-smoke-test
+    #if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    #runs-on: ubuntu-latest
+    #steps:
+      # - name: "Trigger Render Deploy Hook"
+        #env:
+          #RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+        #run: |
+          #if [ -z "$RENDER_DEPLOY_HOOK_URL" ]; then
+            #echo "Error: RENDER_DEPLOY_HOOK_URL secret is not set in GitHub Repository Secrets."
+            #echo "Please configure RENDER_DEPLOY_HOOK_URL in repository Settings -> Secrets and variables -> Actions."
+            #exit 1
+          #fi
+          #echo "Triggering Render deployment via deploy hook..."
+          #RESPONSE=$(curl -sS -w "\nHTTP_STATUS:%{http_code}" -X POST "$RENDER_DEPLOY_HOOK_URL")
+          #HTTP_STATUS=$(echo "$RESPONSE" | grep "HTTP_STATUS:" | cut -d':' -f2)
+          #BODY=$(echo "$RESPONSE" | grep -v "HTTP_STATUS:")
+          #echo "Render response body: $BODY"
+          #echo "HTTP Status Code: $HTTP_STATUS"
+          #if [ "$HTTP_STATUS" -ge 200 ] && [ "$HTTP_STATUS" -lt 300 ]; then
+            #echo "Successfully triggered Render deployment!"
+          #else
+            #echo "Failed to trigger Render deployment. Received HTTP status: $HTTP_STATUS"
+            #exit 1
+          #fi

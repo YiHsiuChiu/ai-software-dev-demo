@@ -38,7 +38,7 @@ jobs:
         run: |
           response=$(curl --fail-with-body -sS -G \
             -u "${SONAR_TOKEN}:" \
-            --data-urlencode "componentKeys=YiHsiuChiu_ci-cd-demo" \
+            --data-urlencode "compontneKeys=hanson92828_ai-software-dev-demo" \
             --data-urlencode "impactSeverities=HIGH,BLOCKER" \
             --data-urlencode "issueStatuses=OPEN,CONFIRMED" \
             "https://sonarcloud.io/api/issues/search")
